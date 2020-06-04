@@ -134,16 +134,22 @@ if(params.input_file){
 			.splitCsv()
 			.map { row -> tuple("${row[0]}" , "${row[1]}" , file("${row[2]}"), file("${row[3]}")) }
 			.set { readPairstmp }
-	
+
 	readPairs2merge = readPairstmp.groupTuple(by: 0)
 	single   = Channel.create()
 	multiple = Channel.create()
 	multiple1 = Channel.create()
 	multiple2 = Channel.create()
+  multiple3 = Channel.create()
+	multiple4 = Channel.create()
 	readPairs2merge.choice( single,multiple ) { a -> a[1].size() == 1 ? 0 : 1 }
 	single2 = single.map { row -> tuple(row[0] , 1 , row[1][0], row[2][0], row[3][0])  }
-	multiple.separate(multiple1,multiple2){ row -> [ [row[0] , 2 ,  row[1][0], row[2][0], row[3][0]] , [row[0] , 2 , row[1][1], row[2][1],  row[3][1]] ] }
-	readPairs=single2.concat(multiple1 ,multiple2 )
+  // adapted to 4 lanes:
+	multiple.separate(multiple1,multiple2,multiple3,multiple4){ row -> [ [row[0] , 4 ,  row[1][0], row[2][0], row[3][0]] ,
+     [row[0] , 4 , row[1][1], row[2][1],  row[3][1]], // sm, nb_rgs, rg, fastq1, fastq2, one line per lane
+     [row[0] , 4 , row[1][2], row[2][2],  row[3][2]],
+     [row[0] , 4 , row[1][3], row[2][3],  row[3][3]] ] }
+	readPairs=single2.concat(multiple1, multiple2, multiple3, multiple4 )
 }else{
    if (file(params.input_folder).listFiles().findAll { it.name ==~ /.*${params.fastq_ext}/ }.size() > 0){
     	println "fastq files found, proceed with alignment"
@@ -163,7 +169,7 @@ if(mode=='bam'){
         cpus params.cpu
         memory params.mem+'G'
         tag { file_tag }
-        
+
         if(!params.recalibration) publishDir "${params.output_folder}/BAM/", mode: 'copy'
 
 	input:
@@ -177,7 +183,7 @@ if(mode=='bam'){
 	file ref_pac
 	file ref_alt
 	file postaltjs
-     
+
         output:
 	set val(file_tag_new), val(1), val("RG"), file("${file_tag_new}*.bam*")  into bam_bai_files0
 
@@ -186,7 +192,7 @@ if(mode=='bam'){
 	file_tag_new=file_tag+'_realigned'
 	if(params.trim) file_tag_new=file_tag_new+'_trimmed'
 	if(params.alt)  file_tag_new=file_tag_new+'_alt'
-	
+
 	if(params.alt==null){
 	  ignorealt='-j'
 	  postalt=''
@@ -197,7 +203,7 @@ if(mode=='bam'){
 	if(params.trim==null){
 	  preproc=''
 	}else{
-	  	
+
 	  preproc='AdapterRemoval --interleaved --file1 /dev/stdin --output1 /dev/stdout |'
 	}
 	if(params.bwa_option_M==null){
@@ -218,14 +224,14 @@ if(mode=='bam'){
 }
 if(mode=='fastq'){
     println "fastq mode"
-        
+
     process fastq_alignment {
         cpus params.cpu
-        memory params.mem+'GB'    
+        memory params.mem+'GB'
         tag { "${file_tag}_${read_group}" }
- 	
-	if(!params.recalibration){ publishDir "${params.output_folder}/BAM/", mode: 'copy', 
-            saveAs: {filename -> 
+
+	if(!params.recalibration){ publishDir "${params.output_folder}/BAM/", mode: 'copy',
+            saveAs: {filename ->
                 if (nb_rgs == 1) "$filename"
                 else null
 		}
@@ -242,20 +248,20 @@ if(mode=='fastq'){
 	file ref_pac
 	file ref_alt
 	file postaltjs
-                 
+
         output:
 	set val(file_tag_new), val(nb_rgs), val(read_group),  file("${file_tag_new}*.bam*") into bam_bai_files0
 
         shell:
 	pair = [pair1,pair2]
-	file_tag_new=file_tag 
+	file_tag_new=file_tag
 	//+"_${read_group}"
 	println file_tag_new
 	bwa_threads  = params.cpu.intdiv(2) - 1
         sort_threads = params.cpu.intdiv(2) - 1
         sort_mem     = params.mem.intdiv(4)
 	if(params.trim) file_tag_new=file_tag_new+'_trimmed'
-        if(params.alt)  file_tag_new=file_tag_new+'_alt'	
+        if(params.alt)  file_tag_new=file_tag_new+'_alt'
 	if(nb_rgs==1){
 		file_tag_new=file_tag_new+"_${read_group}"
 		compsort=" sambamba view -S -f bam -l 0 /dev/stdin | sambamba sort -t ${sort_threads} -m ${sort_mem}G --tmpdir=${file_tag}_tmp -o ${file_tag_new}.bam /dev/stdin"
@@ -288,7 +294,7 @@ if(mode=='fastq'){
 		AdapterRemoval --file1 !{pair[0]} --file2 !{pair[1]} --interleaved-output --output1 /dev/stdout | bwa mem !{ignorealt} !{bwa_opt} -t!{bwa_threads} -R "@RG\\tID:!{file_tag}.!{read_group}\\tSM:!{file_tag}\\t!{params.RG}" -p !{ref} - | !{postalt} samblaster !{samblaster_opt} --addMateTags | !{compsort}
 		'''
 	}
-	
+
      }
 }
 
@@ -298,7 +304,7 @@ if(params.input_file){
 	multiple_bam0 = Channel.create()
 	bam_bai_files0.choice( single_bam,multiple_bam0 ) { a -> a[1] == 1 ? 0 : 1 }
 	( mult2count, mult2QC, multiple_bam ) = multiple_bam0.into( 3 )
-	
+
 	//QC on each run
 	process qualimap_multi {
 	    cpus params.cpu
@@ -351,31 +357,32 @@ if(params.input_file){
 	//if( nmult >0 ){
 		//println "BAMs from multiple runs detected"
 		bam2merge = multiple_bam.groupTuple(by: 0)
-			 .map { row -> tuple(row[0] , row[1][0] , row[2], row[3][0] , row[3][1] , null ,  null  ) }
+			 .map { row -> tuple(row[0] , row[1][0] , row[2], row[3][0] , row[3][1] , row[3][2], row[3][3]  ) }
 	//}else{
 	//	println "No BAMs from multiple runs detected"
-	//	bam2merge = Channel.create()	
+	//	bam2merge = Channel.create()
 	//}
 
 	process merge {
             cpus params.cpu
             memory params.mem+'G'
             tag { file_tag }
-            if(!params.recalibration) publishDir "$params.output_folder/BAM/", mode: 'copy', pattern: "*.bam*"
+            // we would like to output also not recalibrated bams
+            publishDir "$params.output_folder/BAM_uncalibrated/", mode: 'copy', pattern: "*.bam*"
 
             input:
-            set val(file_tag), val(nb_rgs), val(read_group),  file(bam1), file(bam2), file(bai1), file(bai2) from bam2merge
+            set val(file_tag), val(nb_rgs), val(read_group),  file(bam1), file(bam2), file(bam3), file(bam4) from bam2merge // 4 lanes
 
             output:
             set val(file_tag_new), file("${file_tag_new}.bam"), file("${file_tag_new}.bam.bai") into bam_bai_merged
 
             shell:
-            file_tag_new=file_tag+"_${read_group[0]}-${read_group[1]}_merged"
+            file_tag_new=file_tag+"_${read_group[0]}-${read_group[1]}-${read_group[2]}-${read_group[3]}_merged" // 4 lanes (also in shell)
 	    merge_threads  = params.cpu.intdiv(2) - 1
 	    sort_threads = params.cpu.intdiv(2) - 1
             sort_mem     = params.mem.intdiv(2)
             '''
-	    sambamba merge -t !{merge_threads} -l 0 /dev/stdout !{bam1} !{bam2} |  sambamba view -h /dev/stdin | samblaster -M --addMateTags | sambamba view -S -f bam -l 0 /dev/stdin | sambamba sort -t !{sort_threads} -m !{sort_mem}G --tmpdir=!{file_tag}_tmp -o !{file_tag_new}.bam /dev/stdin
+	    sambamba merge -t !{merge_threads} -l 0 /dev/stdout !{bam1} !{bam2} !{bam4} !{bam4} |  sambamba view -h /dev/stdin | samblaster -M --addMateTags | sambamba view -S -f bam -l 0 /dev/stdin | sambamba sort -t !{sort_threads} -m !{sort_mem}G --tmpdir=!{file_tag}_tmp -o !{file_tag_new}.bam /dev/stdin
             '''
 	}
 
@@ -395,10 +402,10 @@ println "BQSR"
     cpus params.cpu_BQSR
     memory params.mem_BQSR+'G'
     tag { file_tag }
-    
+
     publishDir "$params.output_folder/BAM/", mode: 'copy', pattern: "*bam*"
     publishDir "$params.output_folder/QC/BAM/BQSR/", mode: 'copy',
-	saveAs: {filename -> 
+	saveAs: {filename ->
 		if (filename.indexOf("table") > 0) "$filename"
 		else if (filename.indexOf("plots") > 0) "$filename"
 		else null
@@ -424,8 +431,8 @@ println "BQSR"
     '''
     gatk BaseRecalibrator --java-options "-Xmx!{params.mem_BQSR}G" -R !{ref} -I !{file_tag}.bam --known-sites !{known_snps} --known-sites !{known_indels} -O !{file_tag}_recal.table
     gatk ApplyBQSR --java-options "-Xmx!{params.mem_BQSR}G" -R !{ref} -I !{file_tag}.bam --bqsr-recal-file !{file_tag}_recal.table -O !{file_tag_new}.bam
-    gatk BaseRecalibrator --java-options "-Xmx!{params.mem_BQSR}G" -R !{ref} -I !{file_tag_new}.bam --known-sites !{known_snps} --known-sites !{known_indels} -O !{file_tag_new}_recal.table		
-    gatk AnalyzeCovariates --java-options "-Xmx!{params.mem_BQSR}G" -before !{file_tag}_recal.table -after !{file_tag_new}_recal.table -plots !{file_tag_new}_recalibration_plots.pdf	
+    gatk BaseRecalibrator --java-options "-Xmx!{params.mem_BQSR}G" -R !{ref} -I !{file_tag_new}.bam --known-sites !{known_snps} --known-sites !{known_indels} -O !{file_tag_new}_recal.table
+    gatk AnalyzeCovariates --java-options "-Xmx!{params.mem_BQSR}G" -before !{file_tag}_recal.table -after !{file_tag_new}_recal.table -plots !{file_tag_new}_recalibration_plots.pdf
     mv !{file_tag_new}.bai !{file_tag_new}.bam.bai
     '''
     }
