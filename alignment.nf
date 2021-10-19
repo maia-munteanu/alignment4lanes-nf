@@ -332,6 +332,7 @@ if(params.input_file){
 	}
 
 	process multiqc_multi {
+	    errorStrategy 'ignore' // for the moment we get an error but output are there
 	    cpus 2
 	    memory '1G'
 
@@ -382,7 +383,7 @@ if(params.input_file){
 	    sort_threads = params.cpu.intdiv(2) - 1
             sort_mem     = params.mem.intdiv(2)
             '''
-	    sambamba merge -t !{merge_threads} -l 0 /dev/stdout !{bam1} !{bam2} !{bam4} !{bam4} |  sambamba view -h /dev/stdin | samblaster -M --addMateTags | sambamba view -S -f bam -l 0 /dev/stdin | sambamba sort -t !{sort_threads} -m !{sort_mem}G --tmpdir=!{file_tag}_tmp -o !{file_tag_new}.bam /dev/stdin
+	    sambamba merge -t !{merge_threads} -l 0 /dev/stdout !{bam1} !{bam2} !{bam3} !{bam4} |  sambamba view -h /dev/stdin | samblaster -M --addMateTags | sambamba view -S -f bam -l 0 /dev/stdin | sambamba sort -t !{sort_threads} -m !{sort_mem}G --tmpdir=!{file_tag}_tmp -o !{file_tag_new}.bam /dev/stdin
             '''
 	}
 
