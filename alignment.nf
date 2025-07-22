@@ -20,7 +20,7 @@
 params.input_folder = null
 params.input_file   = null
 params.ref          = 'hg19.fasta'
-params.cpu          = 8
+params.cpu          = 40
 params.mem          = 32
 params.RG           = "PL:ILLUMINA"
 params.fastq_ext    = "fastq.gz"
@@ -35,7 +35,7 @@ params.help         = null
 params.alt          = null
 params.trim         = null
 params.mem_BQSR     = 10
-params.cpu_BQSR     = 2
+params.cpu_BQSR     = 40
 params.bwa_option_M  = null
 
 
